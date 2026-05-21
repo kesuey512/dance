@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+html {
+  background: #fafafa;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #fafafa;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+}
+
+button, input, select {
+  font: inherit;
+}

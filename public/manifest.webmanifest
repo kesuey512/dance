@@ -1,0 +1,23 @@
+{
+  "name": "跳舞记录",
+  "short_name": "跳舞记录",
+  "description": "记录跳舞时长、舞室和训练趋势的 PWA。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#f5f5f5",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
