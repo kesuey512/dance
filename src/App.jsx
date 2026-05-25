@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { DANCE_USER_ID, isSupabaseEnabled, supabase } from "./supabaseClient";
 
 const STUDIOS = ["欲非", "Simple", "Newhope", "Trexdance", "Gsteps", "学校"];
 const DURATION_PRESETS = [90, 120, 140];
+const LOCAL_CACHE_KEY = "dance_pwa_records_v3";
 
 function todayISO() {
   const d = new Date();
@@ -83,6 +85,34 @@ function makeId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function toAppRecord(row) {
+  return {
+    id: row.id,
+    date: row.date,
+    studio: row.studio,
+    duration: Number(row.duration),
+    note: row.note || "",
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+  };
+}
+
+function readLocalCache() {
+  try {
+    const saved = localStorage.getItem(LOCAL_CACHE_KEY) || localStorage.getItem("dance_pwa_records_v2");
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalCache(records) {
+  try {
+    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(records));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
 function Card({ children, className = "" }) {
   return <div className={`rounded-3xl border border-neutral-200 bg-white shadow-sm ${className}`}>{children}</div>;
 }
@@ -122,26 +152,48 @@ export default function DanceTrackerPWA() {
   const [duration, setDuration] = useState(140);
   const [customDuration, setCustomDuration] = useState("");
   const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [syncStatus, setSyncStatus] = useState(isSupabaseEnabled ? "正在同步云端数据..." : "未配置 Supabase，当前为本地缓存模式");
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("dance_pwa_records_v2");
-      if (saved) setRecords(JSON.parse(saved));
-    } catch {
-      setRecords([]);
+    const cached = readLocalCache();
+    if (cached.length) setRecords(cached.map(toAppRecord));
+
+    async function loadFromSupabase() {
+      if (!isSupabaseEnabled || !supabase) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("dance_records")
+        .select("id,date,studio,duration,note,created_at,user_id")
+        .eq("user_id", DANCE_USER_ID)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error(error);
+        setSyncStatus(`云端读取失败：${error.message}。暂时使用本地缓存。`);
+      } else {
+        const next = (data || []).map(toAppRecord);
+        setRecords(next);
+        writeLocalCache(next);
+        setSyncStatus("云端同步正常");
+      }
+      setLoading(false);
     }
+
+    loadFromSupabase();
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("dance_pwa_records_v2", JSON.stringify(records));
-    } catch {
-      // Ignore storage errors in preview environments.
-    }
+    writeLocalCache(records);
   }, [records]);
 
   const sortedRecords = useMemo(() => {
-    return [...records].sort((a, b) => `${b.date}`.localeCompare(`${a.date}`));
+    return [...records].sort((a, b) => `${b.date} ${b.createdAt}`.localeCompare(`${a.date} ${a.createdAt}`));
   }, [records]);
 
   const stats = useMemo(() => {
@@ -192,27 +244,73 @@ export default function DanceTrackerPWA() {
     });
   }, [records]);
 
-  const addRecord = () => {
+  const addRecord = async () => {
     const finalDuration = Number(customDuration) > 0 ? Number(customDuration) : Number(duration);
     if (!date || !studio || !finalDuration || finalDuration <= 0) return;
 
-    setRecords((prev) => [
-      {
-        id: makeId(),
-        date,
-        studio,
-        duration: finalDuration,
-        note: note.trim(),
-        createdAt: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
+    const optimisticRecord = {
+      id: makeId(),
+      date,
+      studio,
+      duration: finalDuration,
+      note: note.trim(),
+      createdAt: new Date().toISOString(),
+    };
+
+    setRecords((prev) => [optimisticRecord, ...prev]);
     setCustomDuration("");
     setNote("");
+
+    if (!isSupabaseEnabled || !supabase) {
+      setSyncStatus("已保存到本地缓存；Supabase 未配置，无法云同步");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("dance_records")
+      .insert({
+        date: optimisticRecord.date,
+        studio: optimisticRecord.studio,
+        duration: optimisticRecord.duration,
+        note: optimisticRecord.note,
+        user_id: DANCE_USER_ID,
+      })
+      .select("id,date,studio,duration,note,created_at,user_id")
+      .single();
+
+    if (error) {
+      console.error(error);
+      setSyncStatus(`云端保存失败：${error.message}。该条已暂存在本地。`);
+      return;
+    }
+
+    const saved = toAppRecord(data);
+    setRecords((prev) => [saved, ...prev.filter((r) => r.id !== optimisticRecord.id)]);
+    setSyncStatus("云端保存成功");
   };
 
-  const removeRecord = (id) => {
+  const removeRecord = async (id) => {
+    const previous = records;
     setRecords((prev) => prev.filter((r) => r.id !== id));
+
+    if (!isSupabaseEnabled || !supabase) {
+      setSyncStatus("已从本地删除；Supabase 未配置");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("dance_records")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", DANCE_USER_ID);
+
+    if (error) {
+      console.error(error);
+      setRecords(previous);
+      setSyncStatus(`云端删除失败：${error.message}`);
+    } else {
+      setSyncStatus("云端删除成功");
+    }
   };
 
   const exportCSV = () => {
@@ -240,10 +338,19 @@ export default function DanceTrackerPWA() {
     <main className="min-h-screen bg-neutral-50 px-4 py-5 text-neutral-900 sm:px-6">
       <div className="mx-auto max-w-5xl space-y-5">
         <section className="space-y-2">
-          <div className="text-sm text-neutral-500">Dance Tracker · PWA Prototype</div>
+          <div className="text-sm text-neutral-500">Dance Tracker · Supabase Sync</div>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">跳舞记录</h1>
-          <p className="text-sm leading-6 text-neutral-600 sm:text-base">手机快速补记舞室与时长，重点看本周、本月和连续训练情况。</p>
+          <p className="text-sm leading-6 text-neutral-600 sm:text-base">手机快速补记舞室与时长，数据优先同步到 Supabase 云端。</p>
         </section>
+
+        <Card className="border-violet-100 bg-gradient-to-r from-violet-50 to-rose-50">
+          <div className="flex items-center justify-between gap-3 p-4 text-sm text-neutral-700 sm:p-5">
+            <span>{loading ? "正在加载..." : syncStatus}</span>
+            <span className="shrink-0 rounded-full bg-white/80 px-3 py-1 text-xs text-neutral-600">
+              {isSupabaseEnabled ? "Cloud" : "Local"}
+            </span>
+          </div>
+        </Card>
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard label="今日" value={formatMinutes(stats.today)} />
@@ -327,7 +434,7 @@ export default function DanceTrackerPWA() {
               />
             </div>
 
-            <PrimaryButton onClick={addRecord} className="w-full text-base">
+            <PrimaryButton onClick={addRecord} className="w-full text-base" disabled={loading}>
               保存记录
             </PrimaryButton>
           </div>
@@ -433,7 +540,7 @@ export default function DanceTrackerPWA() {
               <EmptyText>暂无记录。先保存一条跳舞时长。</EmptyText>
             ) : (
               <div className="space-y-2">
-                {sortedRecords.slice(0, 10).map((r) => (
+                {sortedRecords.slice(0, 20).map((r) => (
                   <div key={r.id} className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
                     <div className="min-w-0">
                       <div className="truncate font-medium">{r.date} · {r.studio} · {formatMinutes(r.duration)}</div>

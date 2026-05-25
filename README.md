@@ -1,57 +1,63 @@
-# 跳舞记录 PWA
+# Dance Tracker PWA - Supabase Sync Version
 
-这是一个基于 Vite + React + Tailwind 的跳舞记录 PWA 第一版。
+这是跳舞记录 PWA 的 Supabase 云端同步版。记录会优先写入 Supabase；如果 Supabase 未配置或网络失败，会使用浏览器本地缓存兜底。
 
-## 功能
+## 1. Supabase 建表
 
-- 舞室下拉选择：欲非 / Simple / Newhope / Trexdance / Gsteps / 学校
-- 时长快捷按钮：90 / 120 / 140 min
-- 自定义分钟数
-- 备注记录
-- 今日 / 本周 / 本月 / 记录数统计
-- 本月目标进度条
-- 最近 35 天热力图
-- 近 8 周训练量
-- 舞室时长占比
-- 本地 localStorage 保存
-- CSV 导出
-- PWA manifest + service worker + 手机桌面图标
+1. 打开 Supabase，创建一个新项目。
+2. 进入左侧 SQL Editor。
+3. 新建 Query。
+4. 复制 `supabase-schema.sql` 里的全部内容并运行。
 
-## 本地运行
+建好的表名是：`dance_records`。
+
+## 2. 获取 Supabase 环境变量
+
+在 Supabase 项目中：
+
+Settings → API
+
+复制：
+
+- Project URL
+- anon public key
+
+## 3. 本地运行
+
+复制 `.env.example` 为 `.env.local`，填入：
+
+```bash
+VITE_SUPABASE_URL=https://你的项目id.supabase.co
+VITE_SUPABASE_ANON_KEY=你的-anon-public-key
+VITE_DANCE_USER_ID=yan
+```
+
+然后运行：
 
 ```bash
 npm install
 npm run dev
 ```
 
-运行后打开终端里显示的网址，通常是：
+## 4. Vercel 部署
+
+在 Vercel 项目中进入：
+
+Settings → Environment Variables
+
+添加：
 
 ```bash
-http://localhost:5173
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+VITE_DANCE_USER_ID
 ```
 
-## 打包检查
+添加后必须重新部署：
 
-```bash
-npm run build
-npm run preview
-```
+Deployments → 选择最新部署 → Redeploy
 
-## 部署到 Vercel
+## 5. 重要说明
 
-1. 把整个文件夹上传到 GitHub。
-2. 打开 Vercel，选择 Add New Project。
-3. 导入这个 GitHub 仓库。
-4. Vercel 会识别 Vite 项目，默认构建命令为 `npm run build`，输出目录为 `dist`。
-5. 部署完成后，用 iPhone Safari 打开 Vercel 网址。
-6. Safari 分享按钮 → 添加到主屏幕。
+这个版本使用 Supabase anon key 和宽松 RLS policy，适合个人轻量记录，不适合存储敏感隐私。舞蹈记录通常问题不大。若后续需要真正私密账号系统，应升级为 Supabase Auth 版本。
 
-## 数据说明
-
-当前版本的数据保存在浏览器 localStorage 中，不是云同步：
-
-- 同一台手机、同一个浏览器/PWA 内可以保留记录；
-- 换手机、清除浏览器数据、换浏览器可能导致记录丢失；
-- 建议定期点击“导出 CSV”备份。
-
-后续可升级为 Supabase 云数据库，实现手机与电脑同步。
